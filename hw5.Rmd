@@ -1,0 +1,213 @@
+---
+title: "Homework 5"
+author: "Daniel Ojeranti"
+date: "11/10/2020"
+output: html_document
+---
+
+```{r, setup, echo = F, message = FALSE, warning=FALSE}
+library(tidyverse)
+library(p8105.datasets)
+library(hexbin)
+library(rvest)
+library(ggridges)
+library(patchwork)
+knitr::opts_chunk$set(
+	fig.width = 6, 
+  fig.asp = .6,
+  out.width = "90%"
+)
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+set.seed(0817)
+```
+
+## Problem 1
+
+```{r, message = FALSE, warning = FALSE}
+homi.df =
+  read_csv("C:/Users/danie/Documents/Columbia Semester 1 Files/Data Science  R Code/Homeowrks/p8105_hw5_do2381/homi-data/homicide-data.csv")
+
+
+homicide.df =
+  read_csv("C:/Users/danie/Documents/Columbia Semester 1 Files/Data Science  R Code/Homeowrks/p8105_hw5_do2381/homi-data/homicide-data.csv") %>% 
+  mutate(
+    city_state = str_c(city,state,sep = "-"),
+    resolved = case_when(
+      disposition == "Closed without arrest" ~ "unsolved",
+      disposition == "Open/No arrest"        ~ "unsolved",
+      disposition == "Closed by arrest"      ~ "solved"
+    )
+  ) %>% 
+  select(city_state,resolved) %>% 
+  filter(city_state != "Tulsa-AL")
+  
+```
+
+The raw  dataset that comprised of 0ver 52,000 criminal homicides in 50 different cities. The data set contained the city, reported date, victims' first and last name and their respective race. This dataset contained `r nrow(homi.df)`rows and `r ncol(homi.df)` columns
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+aggregate.df =
+  homicide.df %>% 
+  group_by(city_state) %>% 
+  summarize(
+    hom_total = n(),
+    hom_unsolved = sum(resolved == "unsolved")
+  )
+```
+
+# Baltimore prop test
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+prop.test(
+  aggregate.df %>%  
+    filter(city_state == "Baltimore-MD") %>% 
+    pull(hom_unsolved),
+  aggregate.df %>%  
+    filter(city_state == "Baltimore-MD") %>% 
+    pull(hom_total)) %>% 
+    broom::tidy()
+
+
+```
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+results.df =
+  aggregate.df %>% 
+  mutate(
+    prop_tests = map2(.x = hom_unsolved, .y = hom_total, ~prop.test(x = .x, n = .y)),
+    tidy_tests = map(.x = prop_tests, ~broom::tidy(.x))
+  ) %>% 
+  select(-prop_tests) %>% 
+  unnest(tidy_tests) %>% 
+  select(city_state, estimate, conf.low, conf.high)
+```
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+results.df %>% 
+  mutate(city_state = fct_reorder(city_state, estimate)) %>% 
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point() +
+  geom_errorbar((aes(ymin = conf.low, ymax = conf.high)))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+## Problem 2
+
+Import data
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+data = read_csv("~/Columbia Semester 1 Files/Data Science  R Code/Homeowrks/p8105_hw5_do2381/longi-data/con_01.csv")
+```
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+
+
+path_df =
+  tibble(
+    path = list.files("longi-data"))%>% 
+  mutate(
+    path = str_c("longi-data/", path),
+    data = map(.x = path,~read_csv(.x))) %>% 
+  separate(path, c("path","subject_id"), sep = "/") %>% 
+  separate(subject_id, c("arm","subject_id"), sep = "_") %>% 
+  mutate(
+      subject_id = str_replace(subject_id, ".csv", "")) %>%  
+  select(-path) %>% 
+  unnest() %>% 
+    pivot_longer(
+    week_1:week_8,
+    names_to = "week",
+    values_to = "data"
+    ) %>% 
+   mutate(
+      week = str_replace(week, "week_", ""),
+      week = as.numeric(week))
+
+  
+path_df %>% 
+  ggplot(aes(x = week , y = data, color = subject_id ))  + 
+  geom_point() +
+  geom_line() +
+  facet_grid(.~arm)
+  
+
+```
+The observations in the experimental group gets progressively higher as the weeks go by, indicating that the exposure of the experimental group has some positive effect on the outcome throughout the 8 week period.However, in the control group, it is not apparent that there is an effect that is consistent with all individuals in the study through the 8 week period indicating no effect.
+
+## Problem 3
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+
+sim.mean.sd = function(n,mu,sigma) {
+  sim.data = tibble(
+    x = rnorm(n = n, mean = mu, sd = sigma)
+  )
+  
+  sim.data %>% 
+    summarize(
+      samp = x )
+}
+
+sim.results  = 
+  tibble(
+    mu = c(0,1,2,3,4,5,6)) %>% 
+    mutate(
+      output.lists = map(.x = mu, ~rerun(5000,sim.mean.sd(30,.x,5)))) %>% 
+    unnest() %>% 
+    mutate(
+      t_test = map(.x = output.lists, ~t.test(x = .x , mu = 0, alternative = 'two.sided', paired = FALSE, conf.level = 0.95)),
+      tidy_tests = map(.x = t_test, ~broom::tidy(.x))) %>% 
+    select(-output.lists,-t_test) %>% 
+    unnest()
+   
+
+
+  
+plot1.df =
+  sim.results %>%
+mutate(reject = ifelse( p.value > "0.05", 0, 1)) %>%
+group_by(mu) %>%
+summarize(reject.prop = mean(reject)) %>%
+ggplot(aes(x = mu, y = reject.prop)) +
+geom_point() +
+labs(
+title = "Proportion of Rejection",
+x = "True Mu",
+y = "Power")
+
+plot1.df
+```
+
+It looks like the power of the test follows a normal distribution with a true mean of 3. as the mean increase to the true mean of 3, the power seems to peek. When the true mean increases afterwards, the power is decreased.
+
+```{r,echo = F, message = FALSE, warning=FALSE}
+plot2.df=
+  sim.results %>% 
+  group_by(mu) %>% 
+  summarize(mean.mu = mean(estimate)) %>% 
+  ggplot(aes(x = mu, y = mean.mu)) +
+  geom_point()
+  
+plot2.df
+  
+plot3.df =
+  sim.results %>% 
+  mutate(reject = ifelse( p.value > "0.05", 0, 1)) %>% 
+  filter(reject == 1) %>% 
+  group_by(mu) %>% 
+  summarize(mean.mu = mean(estimate)) %>% 
+  ggplot(aes(x = mu, y = mean.mu)) +
+  geom_point()
+
+plot3.df
+
+```
+
+The sample average of mu where the null was rejected is approximately equal when mu is 0, and 3. The sample average of mu values of where there null is rejected of 1 and 2 are a overestimation of the true mean parameter, whereas all  sample average of mu values where there null is rejected beyond 3 is an underestimation of the true mean parameter. This can be explained by the variation caused by the variance.
